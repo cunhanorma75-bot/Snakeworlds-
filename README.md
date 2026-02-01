@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Snake Worlds</title>
+
+<style>
+body{margin:0;overflow:hidden;background:#000;font-family:Arial}
+canvas{display:block}
+
+/* HUD */
+#hud{
+position:absolute;top:10px;left:50%;
+transform:translateX(-50%);
+color:white;text-align:center;z-index:2
+}
+#life{width:200px;height:10px;background:#400;margin-top:5px}
+#life div{height:100%;background:red}
+#world{font-size:14px;margin-top:4px}
+#money{font-size:18px;margin-top:4px;color:lime;font-weight:bold;}
+
+/* JOYSTICK */
+#joystick{
+position:absolute;bottom:20px;left:50%;
+transform:translateX(-50%);
+width:220px;height:220px;border-radius:50%;
+background:rgba(255,255,255,.15);z-index:5
+}
+#stick{
+width:80px;height:80px;border-radius:50%;
+background:white;position:absolute;left:70px;top:70px
+}
+
+/* LOBBY */
+#start{
+position:absolute;inset:0;
+display:flex;flex-direction:column;
+align-items:center;justify-content:center;
+animation:bgFlash 2s infinite alternate;z-index:10
+}
+@keyframes bgFlash{
+0%{background:#001a33}
+50%{background:#003300}
+100%{background:#002244}
+}
+#start h1{font-size:52px;margin-bottom:25px;letter-spacing:3px}
+.snake{color:#00ff55;text-shadow:0 0 20px #00ff55}
+.worlds{color:#00aaff;text-shadow:0 0 20px #00aaff}
+#start button{
+padding:14px 34px;font-size:20px;border:none;border-radius:8px;
+background:linear-gradient(45deg,#00ff55,#00aaff);
+font-weight:bold;cursor:pointer;
+box-shadow:0 0 20px rgba(0,255,255,.7);
+margin-top:5px;
+}
+#start button:hover{transform:scale(1.1)}
+
+#lobbyMoney{
+font-size:36px;color:lime;font-weight:bold;margin-top:20px;text-shadow:0 0 10px lime;
+}
+
+/* LOJA */
+#shopPanel{
+position:absolute;top:50px;right:20px;background:rgba(0,0,0,0.9);
+color:white;padding:20px;border-radius:12px;
+display:none; z-index:15;
+width:250px;
+}
+#shopPanel h3{text-align:center;margin-top:0;margin-bottom:10px;}
+.shopItem{display:flex;justify-content:space-between;margin:8px 0;}
+.shopItem button{cursor:pointer;border:none;padding:4px 8px;border-radius:6px;background:lime;color:black;}
+</style>
+</head>
+
+<body>
+
+<!-- LOBBY -->
+<div id="start">
+<h1><span class="snake">Snake</span> <span class="worlds">Worlds</span></h1>
+<div id="lobbyMoney">💰 0</div>
+<button onclick="startGame()">PLAY GAME</button>
+<button onclick="toggleShop()">LOJA</button>
+</div>
+
+<!-- HUD -->
+<div id="hud" style="display:none">
+LV <span id="lv">1</span>
+<div id="life"><div></div></div>
+<div id="world"></div>
+<div id="money">💰 0</div>
+</div>
+
+<!-- LOJA -->
+<div id="shopPanel">
+<h3>Loja de Personagens</h3>
+<div class="shopItem">
+<span>Cursed Ball</span><span>500</span><button onclick="buy(1)">Comprar</button>
+</div>
+<div class="shopItem">
+<span>Radioactive Ball</span><span>1000</span><button onclick="buy(2)">Comprar</button>
+</div>
+<div class="shopItem">
+<span>Big Ball</span><span>2000</span><button onclick="buy(3)">Comprar</button>
+</div>
+<div class="shopItem">
+<span>Hacker Ball</span><span>2500</span><button onclick="buy(4)">Comprar</button>
+</div>
+<div class="shopItem">
+<span>Rainbow Ball</span><span>3500</span><button onclick="buy(5)">Comprar</button>
+</div>
+</div>
+
+<!-- JOYSTICK -->
+<div id="joystick"><div id="stick"></div></div>
+
+<!-- CANVAS -->
+<canvas id="c"></canvas>
+
+<script>
+/* CANVAS */
+const c=document.getElementById("c"),ctx=c.getContext("2d");
+c.width=innerWidth;c.height=innerHeight;
+
+/* AUDIO */
+const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+function tone(f,t=0.15){let o=audioCtx.createOscillator(),g=audioCtx.createGain();o.frequency.value=f;g.gain.value=0.08;o.connect(g);g.connect(audioCtx.destination);o.start();o.stop(audioCtx.currentTime+t);}
+let bg;
+function bgMusic(){let o=audioCtx.createOscillator(),g=audioCtx.createGain();o.type="sine";o.frequency.value=180;g.gain.value=0.03;o.connect(g);g.connect(audioCtx.destination);o.start();return o;}
+
+/* DADOS JOGO */
+let lv=1, life=100, eat=0;
+const worldNames=["Água","Terra","Pré-histórico","Céu","Páscoa","Arco-íris","Pântano","Zumbis","Alienígenas","Final"];
+const worldColors=[["#900","#000"],["#3b2","#260"],["#666","#444"],["#5af","#9df"],["#f9c","#fff"],["red","orange","yellow","green","blue","violet"],["#030","#050"],["#404","#111"],["#0f0","#030"],["#c90","#000"]];
+const p={x:0,y:0,r:15,s:4};
+
+/* DINHEIRO - SALVA E CARREGA DE LOCALSTORAGE */
+let money = +(localStorage.getItem("money")||0);
+function updateMoneyHUD(){
+  document.getElementById("money").innerText="💰 "+money;
+  document.getElementById("lobbyMoney").innerText="💰 "+money;
+}
+
+/* BOLAS */
+let balls=[];
+function spawnBall(bad=false, green=false){balls.push({x:Math.random()*3000-1500,y:Math.random()*3000-1500,bad,green});}
+
+/* SPAWN INICIAL */
+function spawnPack(){for(let i=0;i<25;i++)spawnBall(false);for(let i=0;i<25;i++)spawnBall(true);for(let i=0;i<25;i++)spawnBall(false,true);}
+
+/* SPAWN A CADA 1 MINUTO */
+setInterval(spawnPack,60000);
+
+/* JOYSTICK */
+let jx=0,jy=0;
+const joy=document.getElementById("joystick");
+const stick=document.getElementById("stick");
+joy.ontouchmove=e=>{
+let r=joy.getBoundingClientRect();
+let x=e.touches[0].clientX-r.left-110;
+let y=e.touches[0].clientY-r.top-110;
+let d=Math.min(70,Math.hypot(x,y));
+let a=Math.atan2(y,x);
+jx=Math.cos(a)*(d/70);jy=Math.sin(a)*(d/70);
+stick.style.left=110+jx*70-40+"px";stick.style.top=110+jy*70-40+"px";
+};
+joy.ontouchend=()=>{jx=jy=0;stick.style.left=stick.style.top="70px";};
+
+/* LOJA */
+let shopOpen=false;
+function toggleShop(){
+const panel=document.getElementById("shopPanel");
+shopOpen=!shopOpen;
+panel.style.display=shopOpen?"block":"none";
+}
+
+/* COMPRAR */
+function buy(id){
+const prices=[0,500,1000,2000,2500,3500];
+if(money>=prices[id]){money-=prices[id];localStorage.setItem("money",money);updateMoneyHUD();alert("Você comprou o personagem "+id);}
+}
+
+/* START */
+function startGame(){
+document.getElementById("start").style.display="none";
+document.getElementById("hud").style.display="block";
+bg=bgMusic();
+balls=[];
+spawnPack();
+updateMoneyHUD();
+loop();
+}
+
+/* LOOP */
+function loop(){
+p.x+=jx*p.s;p.y+=jy*p.s;
+const camX=p.x-c.width/2,camY=p.y-c.height/2;
+const world=Math.min(9,Math.floor((lv-1)/15));
+const colors=worldColors[world];
+
+ctx.clearRect(0,0,c.width,c.height);
+ctx.save();ctx.translate(-camX,-camY);
+
+/* CHÃO */
+for(let x=-3000;x<3000;x+=80)
+for(let y=-3000;y<3000;y+=80){
+ctx.fillStyle=colors[(Math.abs(x+y)/80)%colors.length|0];
+ctx.fillRect(x,y,80,80);
+}
+
+/* BOLAS */
+balls.forEach((b,i)=>{
+ctx.fillStyle=b.green?"lime":(b.bad?"white":"yellow");
+ctx.beginPath();ctx.arc(b.x,b.y,8,0,Math.PI*2);ctx.fill();
+if(Math.hypot(p.x-b.x,p.y-b.y)<20){
+balls.splice(i,1);
+spawnBall(b.bad,b.green);
+if(b.green){money++;localStorage.setItem("money",money);updateMoneyHUD();}
+else if(b.bad){life-=25;tone(120);}
+else{eat++;tone(800);}
+}
+});
+
+/* LEVEL */
+if(eat>=3){eat=0;lv++;}
+
+document.getElementById("lv").innerText=lv;
+document.getElementById("life").firstChild.style.width=life+"%";
+document.getElementById("world").innerText=worldNames[world];
+updateMoneyHUD();
+
+/* PLAYER */
+ctx.fillStyle="cyan";
+ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
+ctx.restore();
+
+/* GAME OVER */
+if(life<=0){bg.stop();life=100;p.x=p.y=0;document.getElementById("start").style.display="flex";return;}
+
+requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
